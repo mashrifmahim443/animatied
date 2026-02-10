@@ -1,168 +1,161 @@
 
-import React, { useRef, useEffect, useState, useMemo } from 'react';
-import { MotionValue, useTransform, motion, useScroll } from 'framer-motion';
+import React, { useRef, useEffect } from 'react';
+import { MotionValue, useAnimationFrame, useMotionValue } from 'framer-motion';
 
 interface ImageSequencePlayerProps {
   progress: MotionValue<number>;
 }
 
-/**
- * Since we are in a demo environment, I will use the provided high-res image 
- * as the source. In a production build, these would be 31-120 individual 
- * indexed frames (e.g., frame_001.webp, frame_002.webp).
- */
-const FRAME_COUNT = 31;
-
 const ImageSequencePlayer: React.FC<ImageSequencePlayerProps> = ({ progress }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const imagesRef = useRef<HTMLImageElement[]>([]);
-  const [imagesLoaded, setImagesLoaded] = useState(0);
-  
-  // Use the provided asset URL as the base for the sequence
-  const baseImageUrl = "https://th.bing.com/th/id/OIG2.8Z8_8Z8_8Z8_8Z8_8Z8_?pid=ImgGn"; // Placeholder representing the sequence
-
-  // Calculate the current frame index based on scroll progress (0 to FRAME_COUNT - 1)
-  const frameIndex = useTransform(progress, [0, 0.9], [0, FRAME_COUNT - 1]);
+  const heroImageRef = useRef<HTMLImageElement | null>(null);
+  const internalProgress = useMotionValue(0);
 
   useEffect(() => {
-    // In a real scenario, we load the actual sequence of 31 images.
-    // For this implementation, we simulate the loading of the high-res frames.
-    const loadImages = async () => {
-      const loadedImages: HTMLImageElement[] = [];
-      let count = 0;
+    const img = new Image();
+    img.src = "https://images.unsplash.com/photo-1546435770-a3e426bf472b?auto=format&fit=crop&q=90&w=1200";
+    img.onload = () => { heroImageRef.current = img; };
 
-      for (let i = 0; i < FRAME_COUNT; i++) {
-        const img = new Image();
-        // Since we don't have 31 unique URLs, we simulate the sequence using the provided image
-        // In your final build, replace this with: `src/assets/frames/frame_${i}.jpg`
-        img.src = `https://storage.googleapis.com/generativeai-static/images/veo/headphones-black/frame_${i}.png`;
-        
-        // FALLBACK: Using the high-quality render provided in the prompt for demonstration
-        if (i === 0) img.src = "https://images.unsplash.com/photo-1546435770-a3e426bf472b?auto=format&fit=crop&q=90&w=1200";
-        
-        img.onload = () => {
-          count++;
-          setImagesLoaded(count);
-        };
-        loadedImages.push(img);
-      }
-      imagesRef.current = loadedImages;
-    };
-
-    loadImages();
-  }, []);
-
-  useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
     const dpr = window.devicePixelRatio || 1;
-    const updateSize = () => {
-      const width = window.innerWidth;
-      const height = window.innerHeight;
-      canvas.width = width * dpr;
-      canvas.height = height * dpr;
+    const resize = () => {
+      canvas.width = window.innerWidth * dpr;
+      canvas.height = window.innerHeight * dpr;
       ctx.scale(dpr, dpr);
     };
 
-    window.addEventListener('resize', updateSize);
-    updateSize();
+    window.addEventListener('resize', resize);
+    resize();
+    return () => window.removeEventListener('resize', resize);
+  }, []);
 
-    const render = (index: number) => {
-      const width = window.innerWidth;
-      const height = window.innerHeight;
+  useEffect(() => {
+    return progress.on("change", (v) => internalProgress.set(v));
+  }, [progress, internalProgress]);
+
+  useAnimationFrame(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const p = internalProgress.get();
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    const centerX = width / 2;
+    const centerY = height / 2;
+
+    // RESPONSIVE SCALING FACTOR
+    const isMobile = width < 768;
+    const scaleFactor = Math.min(1.2, Math.max(0.5, width / 1400));
+    const explodeScale = isMobile ? 0.6 : 1;
+
+    ctx.clearRect(0, 0, width, height);
+
+    // DRAW THE HERO PRODUCT
+    if (p < 0.25 || p > 0.85) {
+      const alpha = p < 0.25 ? 1 : (p - 0.85) / 0.15;
+      const fadeOut = p < 0.25 ? Math.max(0, 1 - (p / 0.15)) : alpha;
       
-      ctx.clearRect(0, 0, width, height);
-
-      // We draw the provided high-end render with a "virtual" explosion effect 
-      // if actual frame assets are missing, or the actual frame if they exist.
-      const img = imagesRef.current[index];
-      if (!img || !img.complete) {
-        // Fallback drawing while loading or if missing
-        return;
+      if (heroImageRef.current) {
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, p < 0.25 ? fadeOut : alpha);
+        const img = heroImageRef.current;
+        // Adjust product scale for portrait screens
+        const productBaseScale = width < height ? 0.6 : 0.4;
+        const scale = (productBaseScale + (p * 0.05)) * scaleFactor;
+        const w = img.width * scale;
+        const h = img.height * scale;
+        ctx.drawImage(img, centerX - w/2, centerY - h/2, w, h);
+        ctx.restore();
       }
+    }
 
-      const imgWidth = img.width;
-      const imgHeight = img.height;
-      const ratio = Math.min(width / imgWidth, height / imgHeight) * 0.8;
-      const newWidth = imgWidth * ratio;
-      const newHeight = imgHeight * ratio;
-      const x = (width - newWidth) / 2;
-      const y = (height - newHeight) / 2;
+    // DRAW THE EXPLODED ENGINEERING VIEW
+    if (p > 0.1) {
+      const explodeFactor = Math.min(1, Math.max(0, (p - 0.1) / 0.6));
+      const reassemble = p > 0.75 ? Math.max(0, 1 - (p - 0.75) / 0.2) : 1;
+      const activeExplode = explodeFactor * reassemble;
 
-      ctx.save();
-      
-      // Subtle "breathing" animation based on scroll
-      const scale = 1 + (index / FRAME_COUNT) * 0.05;
-      ctx.translate(width / 2, height / 2);
-      ctx.scale(scale, scale);
-      ctx.translate(-width / 2, -height / 2);
+      const drawComponent = (x: number, y: number, label: string, color: string, radius: number) => {
+        // Apply responsive scale to coordinates
+        const targetX = centerX + (x * activeExplode * explodeScale * scaleFactor);
+        const targetY = centerY + (y * activeExplode * explodeScale * scaleFactor);
+        const alpha = Math.min(1, activeExplode * 2);
+        const r = radius * scaleFactor;
 
-      // Render the frame
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.drawImage(img, x, y, newWidth, newHeight);
-
-      // ADD CINEMATIC OVERLAYS
-      // 1. Technical "HUD" elements when exploding
-      if (index > 5 && index < 25) {
-        const alpha = (index - 5) / 20;
-        ctx.strokeStyle = `rgba(0, 214, 255, ${alpha * 0.3})`;
-        ctx.lineWidth = 0.5;
-        ctx.setLineDash([2, 10]);
+        ctx.save();
+        ctx.translate(targetX, targetY);
+        
+        const g = ctx.createRadialGradient(0, 0, 0, 0, 0, r * 1.5);
+        g.addColorStop(0, `${color}${Math.floor(alpha * 40).toString(16).padStart(2, '0')}`);
+        g.addColorStop(1, 'transparent');
+        ctx.fillStyle = g;
         ctx.beginPath();
-        ctx.arc(width / 2, height / 2, 250 * (1 + alpha * 0.2), 0, Math.PI * 2);
+        ctx.arc(0, 0, r * 1.5, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = `rgba(255, 255, 255, ${alpha * 0.2})`;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.arc(0, 0, r, 0, Math.PI * 2);
         ctx.stroke();
+
+        if (activeExplode > 0.4 && !isMobile) { // Hide labels on tiny screens for clarity
+          ctx.fillStyle = `rgba(255, 255, 255, ${(activeExplode - 0.4) * 2})`;
+          ctx.font = `500 ${Math.max(8, 10 * scaleFactor)}px Inter`;
+          ctx.letterSpacing = '2px';
+          ctx.fillText(label.toUpperCase(), r + 15, 4);
+          ctx.beginPath();
+          ctx.setLineDash([]);
+          ctx.moveTo(r, 0);
+          ctx.lineTo(r + 10, 0);
+          ctx.stroke();
+        }
+        ctx.restore();
+      };
+
+      // Responsive Coordinates
+      drawComponent(0, 0, "Sony QN2e Processor", "#0050FF", 60);
+      drawComponent(-280, 0, "40mm Driver", "#00D6FF", 90);
+      drawComponent(280, 0, "Acoustic Chamber", "#00D6FF", 90);
+      drawComponent(0, -220, "Magnesium Band", "#FFFFFF", 40);
+      drawComponent(-130, -130, "NC Mic", "#0050FF", 20);
+      drawComponent(130, -130, "NC Mic", "#0050FF", 20);
+      drawComponent(-130, 130, "Voice Array", "#00D6FF", 20);
+      drawComponent(130, 130, "Voice Array", "#00D6FF", 20);
+
+      if (activeExplode > 0.2) {
+        ctx.save();
+        ctx.strokeStyle = `rgba(0, 80, 255, ${activeExplode * 0.1})`;
+        ctx.beginPath();
+        ctx.moveTo(centerX - (280 * activeExplode * explodeScale * scaleFactor), centerY);
+        ctx.lineTo(centerX + (280 * activeExplode * explodeScale * scaleFactor), centerY);
+        ctx.moveTo(centerX, centerY - (220 * activeExplode * explodeScale * scaleFactor));
+        ctx.lineTo(centerX, centerY + (130 * activeExplode * explodeScale * scaleFactor));
+        ctx.stroke();
+        ctx.restore();
       }
+    }
 
+    const speed = Math.abs(progress.getVelocity() / 1000);
+    if (speed > 0.1) {
+      ctx.save();
+      ctx.strokeStyle = `rgba(0, 214, 255, ${Math.min(0.2, speed * 0.5)})`;
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, (250 + speed * 100) * scaleFactor, 0, Math.PI * 2);
+      ctx.stroke();
       ctx.restore();
-    };
-
-    const unsub = frameIndex.on("change", (latest) => {
-      requestAnimationFrame(() => render(Math.floor(latest)));
-    });
-
-    return () => {
-      unsub();
-      window.removeEventListener('resize', updateSize);
-    };
-  }, [frameIndex]);
+    }
+  });
 
   return (
-    <div className="relative w-full h-full flex items-center justify-center bg-[#050505]">
-      {/* Background Glow */}
-      <motion.div 
-        style={{
-          opacity: useTransform(progress, [0, 0.5, 1], [0.3, 0.6, 0.3]),
-          background: useTransform(
-            progress,
-            [0, 0.5, 1],
-            [
-              "radial-gradient(circle, rgba(0,80,255,0.15) 0%, transparent 70%)",
-              "radial-gradient(circle, rgba(0,214,255,0.2) 0%, transparent 70%)",
-              "radial-gradient(circle, rgba(0,80,255,0.15) 0%, transparent 70%)"
-            ]
-          )
-        }}
-        className="absolute inset-0 z-0"
-      />
-
-      {/* Main Rendering Surface */}
-      <canvas 
-        ref={canvasRef} 
-        className="relative z-10 w-full h-full object-contain"
-      />
-
-      {/* Fallback Static Image for SEO and Instant Load */}
-      <motion.img
-        src="https://images.unsplash.com/photo-1546435770-a3e426bf472b?auto=format&fit=crop&q=90&w=1200"
-        className="absolute w-[60%] max-w-[800px] h-auto object-contain pointer-events-none grayscale brightness-75"
-        style={{
-          opacity: useTransform(progress, [0, 0.05], [1, 0]),
-          display: imagesLoaded === FRAME_COUNT ? 'none' : 'block'
-        }}
-      />
+    <div className="relative w-full h-full bg-[#050505] flex items-center justify-center pointer-events-none">
+      <canvas ref={canvasRef} className="z-10 mix-blend-screen w-full h-full" />
     </div>
   );
 };
